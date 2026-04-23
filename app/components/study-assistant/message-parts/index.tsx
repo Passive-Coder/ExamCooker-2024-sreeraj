@@ -20,6 +20,7 @@ interface MessagePartRendererProps {
     part: StudyMessagePart;
     messageId: string;
     partIndex: number;
+    isResponseTail?: boolean;
     isStreaming?: boolean;
 }
 
@@ -27,6 +28,7 @@ export function MessagePartRenderer({
     part,
     messageId,
     partIndex,
+    isResponseTail,
     isStreaming,
 }: MessagePartRendererProps) {
     const partId = `${messageId}-${partIndex}`;
@@ -36,6 +38,7 @@ export function MessagePartRenderer({
             <TextPart
                 id={partId}
                 text={(part as { text?: string }).text ?? ""}
+                isResponseTail={isResponseTail}
                 isStreaming={isStreaming}
             />
         );

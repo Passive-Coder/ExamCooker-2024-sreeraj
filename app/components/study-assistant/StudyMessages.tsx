@@ -1,10 +1,11 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatStatus, UIMessage } from "ai";
 import { isToolUIPart } from "ai";
 import { MessagePartRenderer } from "./message-parts";
 import { ReasoningPart } from "./message-parts/reasoning-part";
+import { StudyChatLoader } from "./StudyChatLoader";
 
 type PartLike = { type?: string; text?: string };
 
@@ -69,6 +70,9 @@ export const StudyMessages = memo(function StudyMessages({
     const userScrolledUp = useRef(false);
     const lastLenRef = useRef(messages.length);
     const clampRafRef = useRef<number | null>(null);
+    const didInitialPositionRef = useRef(false);
+    const awaitingSentBubbleRef = useRef(false);
+    const [recentlySentUserId, setRecentlySentUserId] = useState<string | null>(null);
 
     const lastUserIndex = useMemo(() => {
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -98,19 +102,32 @@ export const StudyMessages = memo(function StudyMessages({
         return false;
     }, [isTransitioning, messages, status]);
 
-    const shouldReserveLoaderMinHeight = useMemo(() => {
-        if (messages.length === 0 && isTransitioning) return true;
-        const last = messages[messages.length - 1];
-        if (!last) return false;
-        if (last.role === "user") return true;
-        if (status === "submitted") return true;
-        if (status === "streaming" && last.role === "assistant") {
-            const parts = Array.isArray(last.parts) ? last.parts : [];
-            if (parts.length === 0) return true;
-            return !assistantHasVisibleContent(parts);
-        }
-        return false;
-    }, [isTransitioning, messages, status]);
+    const shouldReserveLoaderMinHeight = shouldShowBottomLoader;
+
+    const alignLastAnchorToVisibleBottom = useCallback(
+        (selector: string, marginBottom: number) => {
+            const el = scrollRef.current;
+            if (!el) return;
+
+            const anchors = el.querySelectorAll<HTMLElement>(selector);
+            const anchor = anchors[anchors.length - 1];
+            if (!anchor) return;
+
+            const elRect = el.getBoundingClientRect();
+            const anchorRect = anchor.getBoundingClientRect();
+            const anchorBottomInContent =
+                anchorRect.bottom - elRect.top + el.scrollTop;
+            const desiredScrollTop = Math.max(
+                0,
+                anchorBottomInContent - (el.clientHeight - marginBottom)
+            );
+
+            if (Math.abs(el.scrollTop - desiredScrollTop) > 1) {
+                el.scrollTop = desiredScrollTop;
+            }
+        },
+        []
+    );
 
     const clampScrollToFirstUser = useCallback(() => {
         const el = scrollRef.current;
@@ -128,6 +145,14 @@ export const StudyMessages = memo(function StudyMessages({
         }
     }, []);
 
+    const keepLoaderJustVisible = useCallback(() => {
+        alignLastAnchorToVisibleBottom("[data-study-loader-anchor]", 12);
+    }, [alignLastAnchorToVisibleBottom]);
+
+    const keepStreamingTailVisible = useCallback(() => {
+        alignLastAnchorToVisibleBottom("[data-study-assistant-tail-anchor]", 20);
+    }, [alignLastAnchorToVisibleBottom]);
+
     const handleScroll = useCallback(
         (el: HTMLDivElement) => {
             const nearBottom =
@@ -142,47 +167,216 @@ export const StudyMessages = memo(function StudyMessages({
         [clampScrollToFirstUser]
     );
 
+    const showPendingBubble =
+        Boolean(pendingUserText) &&
+        !(messages[messages.length - 1]?.role === "user" &&
+            extractUserMessageText(messages[messages.length - 1]) ===
+                pendingUserText?.trim());
+
+    useEffect(() => {
+        if (messages.length === 0 && !showPendingBubble && !shouldShowBottomLoader) {
+            didInitialPositionRef.current = false;
+            lastLenRef.current = 0;
+        }
+    }, [messages.length, showPendingBubble, shouldShowBottomLoader]);
+
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el || didInitialPositionRef.current) return;
+        if (messages.length === 0 && !showPendingBubble && !shouldShowBottomLoader) {
+            return;
+        }
+
+        didInitialPositionRef.current = true;
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (shouldShowBottomLoader) {
+                    keepLoaderJustVisible();
+                } else {
+                    keepStreamingTailVisible();
+                }
+                clampScrollToFirstUser();
+            });
+        });
+    }, [
+        messages.length,
+        showPendingBubble,
+        shouldShowBottomLoader,
+        clampScrollToFirstUser,
+        keepLoaderJustVisible,
+        keepStreamingTailVisible,
+    ]);
+
     useEffect(() => {
         const el = scrollRef.current;
         if (!el) return;
         const grew = messages.length !== lastLenRef.current;
         lastLenRef.current = messages.length;
-        if (userScrolledUp.current && !grew && !isTransitioning) return;
+        const last = messages[messages.length - 1];
+        const shouldFollowStreaming =
+            isStreaming && last?.role === "assistant";
+        if (shouldShowBottomLoader || shouldFollowStreaming) {
+            return;
+        }
+        if (
+            userScrolledUp.current &&
+            !grew &&
+            !isTransitioning &&
+            !shouldFollowStreaming
+        ) {
+            return;
+        }
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                if (userScrolledUp.current && !grew && !isTransitioning) return;
-                const anchor = el.querySelector<HTMLDivElement>(
-                    '[data-last-user="true"]'
-                );
-                if (grew && anchor) {
-                    anchor.scrollIntoView({ block: "start", behavior: "auto" });
-                } else {
-                    el.scrollTop = el.scrollHeight;
+                if (
+                    userScrolledUp.current &&
+                    !grew &&
+                    !isTransitioning &&
+                    !shouldFollowStreaming
+                ) {
+                    return;
+                }
+                if (shouldShowBottomLoader) {
+                    keepLoaderJustVisible();
+                } else if (shouldFollowStreaming) {
+                    keepStreamingTailVisible();
+                } else if (grew) {
+                    const anchor = el.querySelector<HTMLElement>(
+                        '[data-last-user="true"]'
+                    );
+                    if (anchor) {
+                        const elRect = el.getBoundingClientRect();
+                        const anchorRect = anchor.getBoundingClientRect();
+                        const anchorBottomInContent =
+                            anchorRect.bottom - elRect.top + el.scrollTop;
+                        const visibleBottom = el.scrollTop + el.clientHeight - 72;
+                        if (anchorBottomInContent > visibleBottom) {
+                            el.scrollTop += anchorBottomInContent - visibleBottom;
+                        }
+                    }
                 }
                 clampScrollToFirstUser();
             });
         });
-    }, [messages, isStreaming, isTransitioning, clampScrollToFirstUser]);
+    }, [
+        messages,
+        isStreaming,
+        isTransitioning,
+        shouldShowBottomLoader,
+        clampScrollToFirstUser,
+        keepLoaderJustVisible,
+        keepStreamingTailVisible,
+    ]);
 
-    const showPendingBubble =
-        Boolean(pendingUserText) && !messages.some((m) => m.role === "user");
+    useEffect(() => {
+        const el = scrollRef.current;
+        const last = messages[messages.length - 1];
+        const shouldFollowStreaming =
+            isStreaming && last?.role === "assistant";
+        if (!el || (!shouldShowBottomLoader && !shouldFollowStreaming)) return;
+
+        let frame = 0;
+        let resizeObserver: ResizeObserver | null = null;
+        const observeTarget =
+            el.firstElementChild instanceof HTMLElement ? el.firstElementChild : el;
+
+        const sync = () => {
+            frame = 0;
+            if (shouldShowBottomLoader) {
+                keepLoaderJustVisible();
+            } else {
+                keepStreamingTailVisible();
+            }
+            clampScrollToFirstUser();
+        };
+
+        const scheduleSync = () => {
+            if (frame !== 0) return;
+            frame = window.requestAnimationFrame(sync);
+        };
+
+        scheduleSync();
+
+        const observer = new MutationObserver(scheduleSync);
+        observer.observe(observeTarget, {
+            subtree: true,
+            childList: true,
+            characterData: true,
+        });
+
+        if (typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver(scheduleSync);
+            resizeObserver.observe(el);
+            resizeObserver.observe(observeTarget);
+        }
+
+        window.addEventListener("resize", scheduleSync);
+
+        return () => {
+            observer.disconnect();
+            resizeObserver?.disconnect();
+            window.removeEventListener("resize", scheduleSync);
+            if (frame !== 0) {
+                window.cancelAnimationFrame(frame);
+            }
+        };
+    }, [
+        messages,
+        isStreaming,
+        shouldShowBottomLoader,
+        clampScrollToFirstUser,
+        keepLoaderJustVisible,
+        keepStreamingTailVisible,
+    ]);
+
+    const activeAnimatedUserId = useMemo(() => {
+        const last = lastUserIndex >= 0 ? messages[lastUserIndex] : null;
+        if (
+            pendingUserText &&
+            last?.role === "user" &&
+            extractUserMessageText(last) === pendingUserText.trim()
+        ) {
+            return last.id;
+        }
+        return recentlySentUserId;
+    }, [lastUserIndex, messages, pendingUserText, recentlySentUserId]);
+
+    useEffect(() => {
+        if (pendingUserText) {
+            awaitingSentBubbleRef.current = true;
+        }
+    }, [pendingUserText]);
+
+    useEffect(() => {
+        if (!awaitingSentBubbleRef.current) return;
+        const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : null;
+        if (!lastUser || lastUser.role !== "user") return;
+        setRecentlySentUserId(lastUser.id);
+        awaitingSentBubbleRef.current = false;
+    }, [lastUserIndex, messages]);
+
+    useEffect(() => {
+        if (!recentlySentUserId) return;
+        const timeout = window.setTimeout(() => {
+            setRecentlySentUserId((current) =>
+                current === recentlySentUserId ? null : current
+            );
+        }, 520);
+        return () => {
+            window.clearTimeout(timeout);
+        };
+    }, [recentlySentUserId]);
 
     useEffect(() => {
         if (!showPendingBubble) return;
-        const el = scrollRef.current;
-        if (!el) return;
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                const anchor = el.querySelector<HTMLElement>(
-                    '[data-last-user="true"]'
-                );
-                if (anchor) {
-                    anchor.scrollIntoView({ block: "start", behavior: "auto" });
-                }
+                keepLoaderJustVisible();
                 clampScrollToFirstUser();
             });
         });
-    }, [showPendingBubble, clampScrollToFirstUser]);
+    }, [showPendingBubble, clampScrollToFirstUser, keepLoaderJustVisible]);
 
     return (
         <div
@@ -194,13 +388,11 @@ export const StudyMessages = memo(function StudyMessages({
             <div className="mx-auto flex w-full max-w-3xl flex-col space-y-0 px-4 pt-6 pb-[9.5rem] sm:px-6 sm:pt-8 sm:pb-44">
                 {showPendingBubble && (
                     <div
-                        className="mb-0 flex justify-end"
+                        className="mb-0 flex justify-end study-user-turn study-user-turn--entering"
                         data-last-user="true"
                         data-first-user-anchor=""
                     >
-                        <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl bg-white px-4 py-2.5 text-[15px] leading-relaxed text-black shadow-sm dark:bg-white/10 dark:text-[#D5D5D5]">
-                            {pendingUserText}
-                        </div>
+                        <UserBubble text={pendingUserText ?? ""} animateIn />
                     </div>
                 )}
 
@@ -233,11 +425,16 @@ export const StudyMessages = memo(function StudyMessages({
                                     idx === lastUserIndex ? "true" : undefined
                                 }
                                 data-first-user-anchor={isFirstUser ? "" : undefined}
-                                className={`flex justify-end ${turnClass}`}
+                                className={`flex justify-end ${turnClass} study-user-turn ${
+                                    message.id === activeAnimatedUserId
+                                        ? "study-user-turn--entering"
+                                        : ""
+                                }`}
                             >
-                                <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl bg-white px-4 py-2.5 text-[15px] leading-relaxed text-black shadow-sm dark:bg-white/10 dark:text-[#D5D5D5]">
-                                    {text}
-                                </div>
+                                <UserBubble
+                                    text={text}
+                                    animateIn={message.id === activeAnimatedUserId}
+                                />
                             </div>
                         );
                     }
@@ -276,6 +473,10 @@ export const StudyMessages = memo(function StudyMessages({
                                     }
                                     messageId={message.id}
                                     partIndex={pIdx}
+                                    isResponseTail={
+                                        isLastMsg &&
+                                        pIdx === parts.length - 1
+                                    }
                                     isStreaming={
                                         isLastMsg &&
                                         isStreaming &&
@@ -292,6 +493,13 @@ export const StudyMessages = memo(function StudyMessages({
                             className={`flex w-full flex-col gap-3 text-black dark:text-[#D5D5D5] ${turnClass}`}
                         >
                             {content}
+                            {isLastMsg && (
+                                <div
+                                    aria-hidden="true"
+                                    data-study-assistant-tail-anchor=""
+                                    className="h-px w-px"
+                                />
+                            )}
                         </div>
                     );
                 })}
@@ -300,7 +508,7 @@ export const StudyMessages = memo(function StudyMessages({
                     <div
                         className={`mt-1 flex items-start ${shouldReserveLoaderMinHeight ? "min-h-[calc(100vh-18rem)]" : ""}`}
                     >
-                        <BouncingDots />
+                        <StudyChatLoader />
                     </div>
                 )}
             </div>
@@ -308,18 +516,33 @@ export const StudyMessages = memo(function StudyMessages({
     );
 });
 
-function BouncingDots() {
+function UserBubble({
+    text,
+    animateIn,
+}: {
+    text: string;
+    animateIn?: boolean;
+}) {
     return (
-        <div className="flex h-6 shrink-0 items-center gap-1.5 pl-0.5">
-            <span className="size-2.5 animate-bounce rounded-full bg-black/40 dark:bg-[#D5D5D5]/40" />
-            <span
-                className="size-2.5 animate-bounce rounded-full bg-black/40 dark:bg-[#D5D5D5]/40"
-                style={{ animationDelay: "150ms" }}
-            />
-            <span
-                className="size-2.5 animate-bounce rounded-full bg-black/40 dark:bg-[#D5D5D5]/40"
-                style={{ animationDelay: "300ms" }}
-            />
+        <div
+            className={[
+                "study-user-bubble",
+                animateIn ? "study-user-bubble--entering" : "",
+            ].join(" ")}
+        >
+            <span className="study-user-bubble__body">
+                <span className="study-user-bubble__text">{text}</span>
+            </span>
         </div>
     );
+}
+
+function extractUserMessageText(message: UIMessage | undefined | null) {
+    if (!message || message.role !== "user") return "";
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    return parts
+        .filter((p) => (p as { type?: string }).type === "text")
+        .map((p) => (p as { text?: string }).text?.trim() ?? "")
+        .join("\n")
+        .trim();
 }
