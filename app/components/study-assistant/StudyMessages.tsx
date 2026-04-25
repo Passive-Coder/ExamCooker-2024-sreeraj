@@ -128,8 +128,7 @@ export const StudyMessages = memo(function StudyMessages({
         return false;
     }, [messages, showStreamingIndicators, status]);
 
-    const shouldReserveLoaderMinHeight =
-        shouldShowBottomLoader && messages[messages.length - 1]?.role !== "user";
+    const shouldReserveLoaderMinHeight = false;
 
     const alignLastUserToTop = useCallback((topOffset: number) => {
         const el = scrollRef.current;

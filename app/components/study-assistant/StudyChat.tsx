@@ -8,7 +8,10 @@ import { StudyHeader } from "./StudyHeader";
 import { StudyLanding } from "./StudyLanding";
 import { StudyMessages } from "./StudyMessages";
 import { StudyComposer } from "./StudyComposer";
-import { getStudyChatMessagesAction } from "@/app/actions/studyChats";
+import {
+    getStudyChatMessagesAction,
+    type StudyChatMessageDTO,
+} from "@/app/actions/studyChats";
 import { StudyChatLoader } from "./StudyChatLoader";
 
 interface StudyChatProps {
@@ -19,6 +22,11 @@ interface StudyChatProps {
     onToggleSidebar: () => void;
     onClearScope: () => void;
     onChatUpdated: (info: { chatId: string; title?: string | null }) => void;
+    cachedMessages?: Pick<StudyChatMessageDTO, "id" | "role" | "parts">[];
+    onMessagesSnapshot?: (
+        chatId: string,
+        messages: Pick<StudyChatMessageDTO, "id" | "role" | "parts">[]
+    ) => void;
 }
 
 export function StudyChat({
@@ -29,6 +37,8 @@ export function StudyChat({
     onToggleSidebar,
     onClearScope,
     onChatUpdated,
+    cachedMessages,
+    onMessagesSnapshot,
 }: StudyChatProps) {
     const [input, setInput] = useState("");
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -80,11 +90,24 @@ export function StudyChat({
     useEffect(() => {
         if (hydratedChatIdRef.current === chatId) return;
         hydratedChatIdRef.current = chatId;
-        setIsHydratingChat(true);
+        const normalizedCachedMessages = Array.isArray(cachedMessages)
+            ? cachedMessages.map((message) => ({
+                  id: message.id,
+                  role: message.role,
+                  parts: Array.isArray(message.parts) ? message.parts : [],
+              }))
+            : null;
+        setIsHydratingChat(!normalizedCachedMessages);
         setMessages([]);
         setInput("");
         setEditingMessageId(null);
         setStopRequested(false);
+
+        if (normalizedCachedMessages) {
+            setMessages(normalizedCachedMessages);
+            return;
+        }
+
         let cancelled = false;
         void getStudyChatMessagesAction(chatId)
             .then((list) => {
@@ -108,13 +131,24 @@ export function StudyChat({
         return () => {
             cancelled = true;
         };
-    }, [chatId, setMessages]);
+    }, [cachedMessages, chatId, setMessages]);
 
     useEffect(() => {
         if (status === "ready") {
             setStopRequested(false);
         }
     }, [status]);
+
+    useEffect(() => {
+        onMessagesSnapshot?.(
+            chatId,
+            messages.map((message) => ({
+                id: message.id,
+                role: message.role as "user" | "assistant",
+                parts: Array.isArray(message.parts) ? message.parts : [],
+            }))
+        );
+    }, [chatId, messages, onMessagesSnapshot]);
 
     const handleSend = useCallback(
         (text: string) => {

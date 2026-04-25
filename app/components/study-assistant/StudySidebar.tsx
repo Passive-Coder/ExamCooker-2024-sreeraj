@@ -126,17 +126,33 @@ export function StudySidebar({
             {/* Brand + collapse. Sized so the wordmark sits flush with the
                 rest of the ExamCooker chrome and never collides with the main
                 NavBar. */}
-            <div className="flex h-12 items-center justify-between gap-2 px-3">
-                <SidebarWordmark />
-                <button
-                    type="button"
-                    onClick={onToggleCollapse}
-                    aria-label={isMobile ? "close" : "collapse sidebar"}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-black/60 transition hover:bg-black/5 hover:text-black dark:text-[#D5D5D5]/60 dark:hover:bg-white/5 dark:hover:text-[#D5D5D5]"
-                >
-                    {isMobile ? <X className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-                </button>
-            </div>
+            {isMobile ? (
+                <div className="relative flex h-12 items-center px-3">
+                    <button
+                        type="button"
+                        onClick={onToggleCollapse}
+                        aria-label="close"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-black/60 transition hover:bg-black/5 hover:text-black dark:text-[#D5D5D5]/60 dark:hover:bg-white/5 dark:hover:text-[#D5D5D5]"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                    <div className="ml-auto min-w-0 flex-1 pl-3">
+                        <SidebarWordmark align="end" />
+                    </div>
+                </div>
+            ) : (
+                <div className="flex h-12 items-center justify-between gap-2 px-3">
+                    <SidebarWordmark />
+                    <button
+                        type="button"
+                        onClick={onToggleCollapse}
+                        aria-label="collapse sidebar"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-black/60 transition hover:bg-black/5 hover:text-black dark:text-[#D5D5D5]/60 dark:hover:bg-white/5 dark:hover:text-[#D5D5D5]"
+                    >
+                        <PanelLeftClose className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
 
             {/* New chat + search */}
             <div className="space-y-2 px-3 pb-3">
