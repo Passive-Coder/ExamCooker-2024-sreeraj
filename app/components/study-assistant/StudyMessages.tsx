@@ -1,8 +1,16 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import type { ChatStatus, UIMessage } from "ai";
 import { isToolUIPart } from "ai";
+import { Copy, Pause, PencilLine } from "lucide-react";
 import { MessagePartRenderer } from "./message-parts";
 import { ReasoningPart } from "./message-parts/reasoning-part";
 import { StudyChatLoader } from "./StudyChatLoader";
@@ -43,8 +51,9 @@ interface MessagesProps {
     messages: UIMessage[];
     status: ChatStatus;
     isStreaming?: boolean;
-    isTransitioning?: boolean;
-    pendingUserText?: string | null;
+    showStreamingIndicators?: boolean;
+    onPause?: () => void;
+    onEditLatestPrompt?: (messageId: string, text: string) => void;
 }
 
 function assistantHasVisibleContent(parts: unknown[]): boolean {
@@ -59,20 +68,31 @@ function assistantHasVisibleContent(parts: unknown[]): boolean {
     return false;
 }
 
+function isIncompleteAssistantPart(part: unknown) {
+    return isToolUIPart(part as never)
+        ? ["input-streaming", "input-available"].includes(
+              ((part as { state?: string }).state ?? "input-available")
+          )
+        : false;
+}
+
 export const StudyMessages = memo(function StudyMessages({
     messages,
     status,
     isStreaming,
-    isTransitioning,
-    pendingUserText,
+    showStreamingIndicators,
+    onPause,
+    onEditLatestPrompt,
 }: MessagesProps) {
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const userScrolledUp = useRef(false);
     const lastLenRef = useRef(messages.length);
     const clampRafRef = useRef<number | null>(null);
     const didInitialPositionRef = useRef(false);
-    const awaitingSentBubbleRef = useRef(false);
+    const animatedUserSeedRef = useRef<string | null>(null);
     const [recentlySentUserId, setRecentlySentUserId] = useState<string | null>(null);
+    const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+    const [activeHatActionId, setActiveHatActionId] = useState<string | null>(null);
 
     const lastUserIndex = useMemo(() => {
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -88,10 +108,16 @@ export const StudyMessages = memo(function StudyMessages({
         return -1;
     }, [messages]);
 
+    const latestAssistantId = useMemo(() => {
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i]?.role === "assistant") return messages[i].id;
+        }
+        return null;
+    }, [messages]);
+
     const shouldShowBottomLoader = useMemo(() => {
-        if (messages.length === 0 && isTransitioning) return true;
         const last = messages[messages.length - 1];
-        if (!last) return false;
+        if (!last || !showStreamingIndicators) return false;
         if (last.role === "user") return true;
         if (status === "submitted") return true;
         if (status === "streaming" && last.role === "assistant") {
@@ -100,9 +126,35 @@ export const StudyMessages = memo(function StudyMessages({
             return !assistantHasVisibleContent(parts);
         }
         return false;
-    }, [isTransitioning, messages, status]);
+    }, [messages, showStreamingIndicators, status]);
 
-    const shouldReserveLoaderMinHeight = shouldShowBottomLoader;
+    const shouldReserveLoaderMinHeight =
+        shouldShowBottomLoader && messages[messages.length - 1]?.role !== "user";
+
+    const alignLastUserToTop = useCallback((topOffset: number) => {
+        const el = scrollRef.current;
+        if (!el) return;
+
+        const anchor = el.querySelector<HTMLElement>('[data-last-user="true"]');
+        if (!anchor) return;
+
+        const elRect = el.getBoundingClientRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const anchorTopInContent = anchorRect.top - elRect.top + el.scrollTop;
+        const maxSafeGap = Math.max(
+            10,
+            el.clientHeight - anchorRect.height - 24
+        );
+        const measuredOffset = Math.min(
+            Math.max(topOffset, Math.min(34, Math.round(anchorRect.height * 0.16))),
+            maxSafeGap
+        );
+        const desiredScrollTop = Math.max(0, anchorTopInContent - measuredOffset);
+
+        if (Math.abs(el.scrollTop - desiredScrollTop) > 1) {
+            el.scrollTop = desiredScrollTop;
+        }
+    }, []);
 
     const alignLastAnchorToVisibleBottom = useCallback(
         (selector: string, marginBottom: number) => {
@@ -167,23 +219,18 @@ export const StudyMessages = memo(function StudyMessages({
         [clampScrollToFirstUser]
     );
 
-    const showPendingBubble =
-        Boolean(pendingUserText) &&
-        !(messages[messages.length - 1]?.role === "user" &&
-            extractUserMessageText(messages[messages.length - 1]) ===
-                pendingUserText?.trim());
-
     useEffect(() => {
-        if (messages.length === 0 && !showPendingBubble && !shouldShowBottomLoader) {
+        if (messages.length === 0 && !shouldShowBottomLoader) {
             didInitialPositionRef.current = false;
             lastLenRef.current = 0;
+            animatedUserSeedRef.current = null;
         }
-    }, [messages.length, showPendingBubble, shouldShowBottomLoader]);
+    }, [messages.length, shouldShowBottomLoader]);
 
     useEffect(() => {
         const el = scrollRef.current;
         if (!el || didInitialPositionRef.current) return;
-        if (messages.length === 0 && !showPendingBubble && !shouldShowBottomLoader) {
+        if (messages.length === 0 && !shouldShowBottomLoader) {
             return;
         }
 
@@ -191,7 +238,10 @@ export const StudyMessages = memo(function StudyMessages({
 
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                if (shouldShowBottomLoader) {
+                const last = messages[messages.length - 1];
+                if (last?.role === "user") {
+                    alignLastUserToTop(24);
+                } else if (shouldShowBottomLoader) {
                     keepLoaderJustVisible();
                 } else {
                     keepStreamingTailVisible();
@@ -200,8 +250,9 @@ export const StudyMessages = memo(function StudyMessages({
             });
         });
     }, [
+        alignLastUserToTop,
+        messages,
         messages.length,
-        showPendingBubble,
         shouldShowBottomLoader,
         clampScrollToFirstUser,
         keepLoaderJustVisible,
@@ -214,15 +265,13 @@ export const StudyMessages = memo(function StudyMessages({
         const grew = messages.length !== lastLenRef.current;
         lastLenRef.current = messages.length;
         const last = messages[messages.length - 1];
-        const shouldFollowStreaming =
-            isStreaming && last?.role === "assistant";
+        const shouldFollowStreaming = Boolean(showStreamingIndicators && last?.role === "assistant");
         if (shouldShowBottomLoader || shouldFollowStreaming) {
             return;
         }
         if (
             userScrolledUp.current &&
             !grew &&
-            !isTransitioning &&
             !shouldFollowStreaming
         ) {
             return;
@@ -232,37 +281,24 @@ export const StudyMessages = memo(function StudyMessages({
                 if (
                     userScrolledUp.current &&
                     !grew &&
-                    !isTransitioning &&
                     !shouldFollowStreaming
                 ) {
                     return;
                 }
-                if (shouldShowBottomLoader) {
+                if (last?.role === "user") {
+                    alignLastUserToTop(24);
+                } else if (shouldShowBottomLoader) {
                     keepLoaderJustVisible();
                 } else if (shouldFollowStreaming) {
                     keepStreamingTailVisible();
-                } else if (grew) {
-                    const anchor = el.querySelector<HTMLElement>(
-                        '[data-last-user="true"]'
-                    );
-                    if (anchor) {
-                        const elRect = el.getBoundingClientRect();
-                        const anchorRect = anchor.getBoundingClientRect();
-                        const anchorBottomInContent =
-                            anchorRect.bottom - elRect.top + el.scrollTop;
-                        const visibleBottom = el.scrollTop + el.clientHeight - 72;
-                        if (anchorBottomInContent > visibleBottom) {
-                            el.scrollTop += anchorBottomInContent - visibleBottom;
-                        }
-                    }
                 }
                 clampScrollToFirstUser();
             });
         });
     }, [
+        alignLastUserToTop,
         messages,
-        isStreaming,
-        isTransitioning,
+        showStreamingIndicators,
         shouldShowBottomLoader,
         clampScrollToFirstUser,
         keepLoaderJustVisible,
@@ -273,7 +309,7 @@ export const StudyMessages = memo(function StudyMessages({
         const el = scrollRef.current;
         const last = messages[messages.length - 1];
         const shouldFollowStreaming =
-            isStreaming && last?.role === "assistant";
+            Boolean(showStreamingIndicators) && last?.role === "assistant";
         if (!el || (!shouldShowBottomLoader && !shouldFollowStreaming)) return;
 
         let frame = 0;
@@ -283,7 +319,9 @@ export const StudyMessages = memo(function StudyMessages({
 
         const sync = () => {
             frame = 0;
-            if (shouldShowBottomLoader) {
+            if (last?.role === "user") {
+                alignLastUserToTop(24);
+            } else if (shouldShowBottomLoader) {
                 keepLoaderJustVisible();
             } else {
                 keepStreamingTailVisible();
@@ -322,8 +360,9 @@ export const StudyMessages = memo(function StudyMessages({
             }
         };
     }, [
+        alignLastUserToTop,
         messages,
-        isStreaming,
+        showStreamingIndicators,
         shouldShowBottomLoader,
         clampScrollToFirstUser,
         keepLoaderJustVisible,
@@ -331,30 +370,25 @@ export const StudyMessages = memo(function StudyMessages({
     ]);
 
     const activeAnimatedUserId = useMemo(() => {
-        const last = lastUserIndex >= 0 ? messages[lastUserIndex] : null;
-        if (
-            pendingUserText &&
-            last?.role === "user" &&
-            extractUserMessageText(last) === pendingUserText.trim()
-        ) {
-            return last.id;
-        }
         return recentlySentUserId;
-    }, [lastUserIndex, messages, pendingUserText, recentlySentUserId]);
+    }, [recentlySentUserId]);
 
     useEffect(() => {
-        if (pendingUserText) {
-            awaitingSentBubbleRef.current = true;
-        }
-    }, [pendingUserText]);
-
-    useEffect(() => {
-        if (!awaitingSentBubbleRef.current) return;
         const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex] : null;
         if (!lastUser || lastUser.role !== "user") return;
+        if (!animatedUserSeedRef.current) {
+            animatedUserSeedRef.current = lastUser.id;
+            return;
+        }
+        if (animatedUserSeedRef.current === lastUser.id) return;
+        animatedUserSeedRef.current = lastUser.id;
         setRecentlySentUserId(lastUser.id);
-        awaitingSentBubbleRef.current = false;
-    }, [lastUserIndex, messages]);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                alignLastUserToTop(24);
+            });
+        });
+    }, [alignLastUserToTop, lastUserIndex, messages]);
 
     useEffect(() => {
         if (!recentlySentUserId) return;
@@ -369,14 +403,42 @@ export const StudyMessages = memo(function StudyMessages({
     }, [recentlySentUserId]);
 
     useEffect(() => {
-        if (!showPendingBubble) return;
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                keepLoaderJustVisible();
-                clampScrollToFirstUser();
-            });
-        });
-    }, [showPendingBubble, clampScrollToFirstUser, keepLoaderJustVisible]);
+        if (!copiedMessageId) return;
+        const timeout = window.setTimeout(() => {
+            setCopiedMessageId((current) =>
+                current === copiedMessageId ? null : current
+            );
+        }, 1600);
+        return () => {
+            window.clearTimeout(timeout);
+        };
+    }, [copiedMessageId]);
+
+    useEffect(() => {
+        if (!activeHatActionId) return;
+        const timeout = window.setTimeout(() => {
+            setActiveHatActionId((current) =>
+                current === activeHatActionId ? null : current
+            );
+        }, 1300);
+        return () => {
+            window.clearTimeout(timeout);
+        };
+    }, [activeHatActionId]);
+
+    const triggerActionHat = useCallback((actionId: string) => {
+        setActiveHatActionId(actionId);
+    }, []);
+
+    const handleCopyText = useCallback(async (id: string, text: string) => {
+        if (!text || typeof navigator === "undefined" || !navigator.clipboard) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedMessageId(id);
+        } catch {
+            // no-op
+        }
+    }, []);
 
     return (
         <div
@@ -385,17 +447,7 @@ export const StudyMessages = memo(function StudyMessages({
             className="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain"
             style={{ overflowAnchor: "none" }}
         >
-            <div className="mx-auto flex w-full max-w-3xl flex-col space-y-0 px-4 pt-6 pb-[9.5rem] sm:px-6 sm:pt-8 sm:pb-44">
-                {showPendingBubble && (
-                    <div
-                        className="mb-0 flex justify-end study-user-turn study-user-turn--entering"
-                        data-last-user="true"
-                        data-first-user-anchor=""
-                    >
-                        <UserBubble text={pendingUserText ?? ""} animateIn />
-                    </div>
-                )}
-
+            <div className="mx-auto flex w-full max-w-3xl flex-col space-y-0 px-4 pt-6 pb-28 sm:px-6 sm:pt-8 sm:pb-32">
                 {messages.map((message, idx) => {
                     const isUser = message.role === "user";
                     const parts = Array.isArray(message.parts) ? message.parts : [];
@@ -417,6 +469,8 @@ export const StudyMessages = memo(function StudyMessages({
                             .filter((p) => (p as { type?: string }).type === "text")
                             .map((p) => (p as { text?: string }).text ?? "")
                             .join("\n");
+                        const copyActionId = `${message.id}:prompt-copy`;
+                        const editActionId = `${message.id}:prompt-edit`;
                         const isFirstUser = idx === firstUserIndex;
                         return (
                             <div
@@ -431,10 +485,36 @@ export const StudyMessages = memo(function StudyMessages({
                                         : ""
                                 }`}
                             >
-                                <UserBubble
-                                    text={text}
-                                    animateIn={message.id === activeAnimatedUserId}
-                                />
+                                <div className="flex max-w-[84%] min-w-0 flex-col items-end gap-2 sm:max-w-[78%]">
+                                    <UserBubble
+                                        text={text}
+                                        animateIn={message.id === activeAnimatedUserId}
+                                    />
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <TurnActionButton
+                                            icon={Copy}
+                                            label="Copy prompt"
+                                            onClick={() => {
+                                                triggerActionHat(copyActionId);
+                                                void handleCopyText(message.id, text);
+                                            }}
+                                            hat="copy"
+                                            fired={activeHatActionId === copyActionId}
+                                        />
+                                        {onEditLatestPrompt && text ? (
+                                            <TurnActionButton
+                                                icon={PencilLine}
+                                                label="Edit prompt"
+                                                onClick={() => {
+                                                    triggerActionHat(editActionId);
+                                                    onEditLatestPrompt(message.id, text);
+                                                }}
+                                                hat="edit"
+                                                fired={activeHatActionId === editActionId}
+                                            />
+                                        ) : null}
+                                    </div>
+                                </div>
                             </div>
                         );
                     }
@@ -442,7 +522,7 @@ export const StudyMessages = memo(function StudyMessages({
                     const showAssistantPlaceholder =
                         parts.length === 0 &&
                         isLastMsg &&
-                        isStreaming &&
+                        Boolean(showStreamingIndicators) &&
                         shouldShowBottomLoader;
 
                     const content = showAssistantPlaceholder ? null : (
@@ -479,20 +559,53 @@ export const StudyMessages = memo(function StudyMessages({
                                     }
                                     isStreaming={
                                         isLastMsg &&
-                                        isStreaming &&
+                                        Boolean(showStreamingIndicators) &&
                                         pIdx === parts.length - 1
                                     }
+                                    isGlobalStreaming={Boolean(showStreamingIndicators)}
                                 />
                             );
                         })
                     );
 
+                    const isLatestAssistant = message.id === latestAssistantId;
+                    const hasIncompleteTool = parts.some(isIncompleteAssistantPart);
+                    const assistantTextResult = extractAssistantTextResult(message);
+                    const responseCopyActionId = `${message.id}:response-copy`;
+                    const isCompletedAssistant =
+                        !hasIncompleteTool && !(isLatestAssistant && isLastMsg && isStreaming);
                     return (
                         <div
                             key={message.id}
                             className={`flex w-full flex-col gap-3 text-black dark:text-[#D5D5D5] ${turnClass}`}
                         >
                             {content}
+                            {!showAssistantPlaceholder ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {isLastMsg && isStreaming ? (
+                                        <TurnActionButton
+                                            icon={Pause}
+                                            label="Pause"
+                                            onClick={onPause}
+                                        />
+                                    ) : null}
+                                    {isCompletedAssistant && assistantTextResult ? (
+                                        <TurnActionButton
+                                            icon={Copy}
+                                            label={copiedMessageId === message.id ? "Copied" : "Copy"}
+                                            onClick={() => {
+                                                triggerActionHat(responseCopyActionId);
+                                                void handleCopyText(
+                                                    message.id,
+                                                    assistantTextResult
+                                                );
+                                            }}
+                                            hat="copy"
+                                            fired={activeHatActionId === responseCopyActionId}
+                                        />
+                                    ) : null}
+                                </div>
+                            ) : null}
                             {isLastMsg && (
                                 <div
                                     aria-hidden="true"
@@ -506,7 +619,7 @@ export const StudyMessages = memo(function StudyMessages({
 
                 {shouldShowBottomLoader && (
                     <div
-                        className={`mt-1 flex items-start ${shouldReserveLoaderMinHeight ? "min-h-[calc(100vh-18rem)]" : ""}`}
+                        className={`mt-1 flex items-start ${shouldReserveLoaderMinHeight ? "min-h-[calc(100vh-22rem)] sm:min-h-[calc(100vh-20rem)]" : ""}`}
                     >
                         <StudyChatLoader />
                     </div>
@@ -515,6 +628,50 @@ export const StudyMessages = memo(function StudyMessages({
         </div>
     );
 });
+
+function TurnActionButton({
+    icon: Icon,
+    label,
+    onClick,
+    hat = "none",
+    fired,
+}: {
+    icon: typeof PencilLine;
+    label: string;
+    onClick?: () => void;
+    hat?: "copy" | "edit" | "none";
+    fired?: boolean;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            className="study-turn-action"
+            data-hat={hat !== "none" ? hat : undefined}
+            data-fired={fired ? "true" : undefined}
+        >
+            <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                <Icon className="h-3.5 w-3.5" />
+                {hat !== "none" ? (
+                    <span
+                        className={[
+                            "study-turn-action__hat",
+                            hat === "copy"
+                                ? "study-turn-action__hat--copy"
+                                : "study-turn-action__hat--edit",
+                        ].join(" ")}
+                        aria-hidden="true"
+                    />
+                ) : null}
+                {fired && hat !== "none" ? (
+                    <span className="study-copy-hat-burst" aria-hidden="true" />
+                ) : null}
+            </span>
+        </button>
+    );
+}
 
 function UserBubble({
     text,
@@ -537,12 +694,15 @@ function UserBubble({
     );
 }
 
-function extractUserMessageText(message: UIMessage | undefined | null) {
-    if (!message || message.role !== "user") return "";
+function extractAssistantTextResult(message: UIMessage) {
     const parts = Array.isArray(message.parts) ? message.parts : [];
     return parts
-        .filter((p) => (p as { type?: string }).type === "text")
-        .map((p) => (p as { text?: string }).text?.trim() ?? "")
-        .join("\n")
+        .map((part) =>
+            (part as { type?: string }).type === "text"
+                ? ((part as { text?: string }).text ?? "").trim()
+                : ""
+        )
+        .filter(Boolean)
+        .join("\n\n")
         .trim();
 }

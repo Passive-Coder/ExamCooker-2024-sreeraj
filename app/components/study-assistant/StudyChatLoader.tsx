@@ -1,7 +1,13 @@
-export function StudyChatLoader() {
+import { memo } from "react";
+
+export const StudyChatLoader = memo(function StudyChatLoader({
+    centered = false,
+}: {
+    centered?: boolean;
+}) {
     return (
         <div
-            className="study-chat-loader"
+            className={`study-chat-loader ${centered ? "study-chat-loader--centered" : ""}`}
             data-study-loader-anchor=""
             role="status"
             aria-live="polite"
@@ -14,4 +20,4 @@ export function StudyChatLoader() {
             </div>
         </div>
     );
-}
+});

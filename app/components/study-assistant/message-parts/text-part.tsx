@@ -14,19 +14,13 @@ interface TextPartProps {
 type PencilState = {
     left: number;
     top: number;
-    travel: number;
-    durationMs: number;
-    mode: "streaming" | "idle" | "settled";
+    mode: "streaming" | "settled";
 };
 
 const STREAMING_PENCIL_WIDTH_PX = 28;
 const STREAMING_PENCIL_SIDE_INSET_PX = 8;
-const STREAMING_ACTIVITY_WINDOW_MS = 420;
-const STREAMING_PENCIL_SCAN_SPEED_PX_PER_S = 320;
-const STREAMING_PENCIL_MIN_DURATION_MS = 1800;
-const STREAMING_PENCIL_MAX_DURATION_MS = 4200;
-const STREAMING_PENCIL_LAST_LINE_GAP_PX = 12;
-const STREAMING_PENCIL_END_GAP_PX = 10;
+const STREAMING_PENCIL_BASELINE_OFFSET_PX = 2;
+const STREAMING_PENCIL_END_GAP_PX = 8;
 
 export const TextPart = memo(function TextPart({
     id,
@@ -36,7 +30,6 @@ export const TextPart = memo(function TextPart({
 }: TextPartProps) {
     const contentRef = useRef<HTMLDivElement | null>(null);
     const animatedTextOnceRef = useRef(false);
-    const lastStreamingTextAtRef = useRef(0);
     const [hasStreamedOnce, setHasStreamedOnce] = useState(false);
     const [pencilState, setPencilState] = useState<PencilState | null>(null);
     const [isEntering, setIsEntering] = useState(false);
@@ -48,12 +41,6 @@ export const TextPart = memo(function TextPart({
             setHasStreamedOnce(true);
         }
     }, [isStreaming]);
-
-    useEffect(() => {
-        if (isStreaming && hasVisibleText(text)) {
-            lastStreamingTextAtRef.current = performance.now();
-        }
-    }, [isStreaming, text]);
 
     useEffect(() => {
         if (!isStreaming) {
@@ -88,19 +75,10 @@ export const TextPart = memo(function TextPart({
         if (!root) return;
 
         let resizeFrame = 0;
-        let idleTimeout = 0;
         let observer: ResizeObserver | null = null;
 
         const updatePosition = () => {
-            const isActivelyStreaming =
-                Boolean(isStreaming) &&
-                hasVisibleText(text) &&
-                performance.now() - lastStreamingTextAtRef.current <=
-                    STREAMING_ACTIVITY_WINDOW_MS;
-            const next = getPencilState(root, {
-                isStreaming: Boolean(isStreaming),
-                isActivelyStreaming,
-            });
+            const next = getPencilState(root, Boolean(isStreaming));
 
             setPencilState((prev) => {
                 if (
@@ -108,8 +86,6 @@ export const TextPart = memo(function TextPart({
                     next &&
                     prev.left === next.left &&
                     prev.top === next.top &&
-                    prev.travel === next.travel &&
-                    prev.durationMs === next.durationMs &&
                     prev.mode === next.mode
                 ) {
                     return prev;
@@ -118,26 +94,13 @@ export const TextPart = memo(function TextPart({
             });
         };
 
-        const scheduleIdleSync = () => {
-            window.clearTimeout(idleTimeout);
-            if (!isStreaming || !hasVisibleText(text)) {
-                return;
-            }
-
-            const elapsedMs = performance.now() - lastStreamingTextAtRef.current;
-            const waitMs = Math.max(0, STREAMING_ACTIVITY_WINDOW_MS - elapsedMs);
-            idleTimeout = window.setTimeout(updatePosition, waitMs + 24);
-        };
-
         updatePosition();
-        scheduleIdleSync();
 
         if (typeof ResizeObserver !== "undefined") {
             observer = new ResizeObserver(() => {
                 window.cancelAnimationFrame(resizeFrame);
                 resizeFrame = window.requestAnimationFrame(() => {
                     updatePosition();
-                    scheduleIdleSync();
                 });
             });
             observer.observe(root);
@@ -145,7 +108,6 @@ export const TextPart = memo(function TextPart({
 
         return () => {
             window.cancelAnimationFrame(resizeFrame);
-            window.clearTimeout(idleTimeout);
             observer?.disconnect();
         };
     }, [isResponseTail, isStreaming, showPencil, text]);
@@ -184,8 +146,6 @@ export const TextPart = memo(function TextPart({
                     style={{
                         left: `${pencilState.left}px`,
                         top: `${pencilState.top}px`,
-                        ["--study-pencil-travel-x" as string]: `${pencilState.travel}px`,
-                        ["--study-pencil-scan-duration" as string]: `${pencilState.durationMs}ms`,
                     }}
                 >
                     <span className="study-streaming-pencil-track">
@@ -203,19 +163,10 @@ function hasVisibleText(text: string) {
 
 function getPencilState(
     root: HTMLElement,
-    {
-        isStreaming,
-        isActivelyStreaming,
-    }: {
-        isStreaming: boolean;
-        isActivelyStreaming: boolean;
-    }
+    isStreaming: boolean
 ): PencilState {
     if (isStreaming) {
-        if (isActivelyStreaming) {
-            return getStreamingPencilState(root);
-        }
-        return getIdlePencilState(root);
+        return getStreamingPencilState(root);
     }
 
     return getSettledPencilState(root);
@@ -229,47 +180,17 @@ function getStreamingPencilState(root: HTMLElement): PencilState {
         minLeft,
         rootRect.width - STREAMING_PENCIL_WIDTH_PX - STREAMING_PENCIL_SIDE_INSET_PX
     );
-    const travel = Math.max(0, maxLeft - minLeft);
-    const desiredTop =
-        getLastLineBottom(root, tail) + STREAMING_PENCIL_LAST_LINE_GAP_PX;
+    const desiredLeft = tail
+        ? clamp(tail.right + STREAMING_PENCIL_END_GAP_PX, minLeft, maxLeft)
+        : maxLeft;
+    const desiredTop = tail
+        ? tail.top + tail.height * 0.78 + STREAMING_PENCIL_BASELINE_OFFSET_PX
+        : getLastLineBottom(root, tail);
 
     return {
-        left: minLeft,
+        left: desiredLeft,
         top: desiredTop,
-        travel,
-        durationMs: getStreamingTravelDurationMs(travel),
         mode: "streaming",
-    };
-}
-
-function getIdlePencilState(root: HTMLElement): PencilState {
-    const rootRect = root.getBoundingClientRect();
-    const tail = findLastTextTail(root);
-    const minLeft = STREAMING_PENCIL_SIDE_INSET_PX;
-    const maxLeft = Math.max(
-        minLeft,
-        rootRect.width - STREAMING_PENCIL_WIDTH_PX - STREAMING_PENCIL_SIDE_INSET_PX
-    );
-    const anchoredLeft = tail
-        ? clamp(
-              tail.right + STREAMING_PENCIL_END_GAP_PX,
-              minLeft,
-              maxLeft
-          )
-        : clamp(
-              rootRect.width / 2 - STREAMING_PENCIL_WIDTH_PX / 2,
-              minLeft,
-              maxLeft
-          );
-    const desiredTop =
-        getLastLineBottom(root, tail) + STREAMING_PENCIL_LAST_LINE_GAP_PX;
-
-    return {
-        left: anchoredLeft,
-        top: desiredTop,
-        travel: 0,
-        durationMs: STREAMING_PENCIL_MIN_DURATION_MS,
-        mode: "idle",
     };
 }
 
@@ -293,8 +214,6 @@ function getSettledPencilState(root: HTMLElement): PencilState {
     return {
         left: clamp(desiredLeft, minLeft, maxLeft),
         top: desiredTop,
-        travel: 0,
-        durationMs: STREAMING_PENCIL_MIN_DURATION_MS,
         mode: "settled",
     };
 }
@@ -309,17 +228,6 @@ function getLastLineBottom(
 
     const rootRect = root.getBoundingClientRect();
     return Math.max(root.scrollHeight, rootRect.height);
-}
-
-function getStreamingTravelDurationMs(travel: number) {
-    const roundTripDurationMs =
-        (Math.max(travel, 1) / STREAMING_PENCIL_SCAN_SPEED_PX_PER_S) * 2000;
-
-    return clamp(
-        roundTripDurationMs,
-        STREAMING_PENCIL_MIN_DURATION_MS,
-        STREAMING_PENCIL_MAX_DURATION_MS
-    );
 }
 
 function findLastTextTail(root: HTMLElement) {

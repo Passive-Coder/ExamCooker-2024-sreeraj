@@ -146,7 +146,7 @@ export function StudySidebar({
                     className="group flex w-full items-center gap-2 rounded-md border border-black/10 bg-white px-3 py-2 text-[13.5px] font-semibold text-black transition hover:bg-white/90 active:scale-[0.99] dark:border-white/10 dark:bg-white/5 dark:text-[#D5D5D5] dark:hover:bg-white/10"
                 >
                     <Plus className="h-4 w-4 text-[#4db3d6] transition-transform group-hover:rotate-90 dark:text-[#3BF4C7]" />
-                    new chat
+                    New chat
                 </button>
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-black/50 dark:text-[#D5D5D5]/50" />
@@ -154,7 +154,7 @@ export function StudySidebar({
                         type="text"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="search chats"
+                        placeholder="Search chats"
                         className="w-full rounded-md border border-black/10 bg-white/60 py-1.5 pl-8 pr-2 text-[12.5px] text-black placeholder:text-black/40 focus:border-[#4db3d6] focus:outline-none focus:ring-2 focus:ring-[#4db3d6]/20 dark:border-white/10 dark:bg-white/5 dark:text-[#D5D5D5] dark:placeholder:text-[#D5D5D5]/40 dark:focus:border-[#3BF4C7] dark:focus:ring-[#3BF4C7]/20"
                     />
                 </div>
@@ -165,8 +165,8 @@ export function StudySidebar({
                 {filtered.length === 0 ? (
                     <div className="mx-2 mt-6 text-[13px] leading-relaxed text-black/55 dark:text-[#D5D5D5]/55">
                         {chats.length === 0
-                            ? "no chats yet."
-                            : `no chats match "${query}".`}
+                            ? "No chats yet."
+                            : `No chats match "${query}".`}
                     </div>
                 ) : (
                     <div className="space-y-4">
@@ -177,10 +177,10 @@ export function StudySidebar({
                                 <section key={bucket}>
                                     <h3 className="mb-1 px-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-black/50 dark:text-[#D5D5D5]/50">
                                         {bucket === "today"
-                                            ? "today"
+                                            ? "Today"
                                             : bucket === "week"
-                                                ? "last 7 days"
-                                                : "older"}
+                                                ? "Last 7 days"
+                                                : "Older"}
                                     </h3>
                                     <ul className="space-y-px">
                                         {items.map((chat) => {
