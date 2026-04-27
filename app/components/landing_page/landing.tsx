@@ -19,11 +19,11 @@ export function GradientText({ children }: { children: React.ReactNode }) {
   );
 }
 
-function WordBetweenLine({ children }: { children: React.ReactNode }) {
+export function WordBetweenLine({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex items-center justify-between">
       <div className="flex-grow border-t border-black dark:border-[#D5D5D5]"></div>
-      <span className="text-center text-3xl md:text-6xl lg:text-8xl font-extrabold flex-shrink text-black dark:text-[#D5D5D5]">
+      <span className="text-center text-3xl md:text-5xl lg:text-6xl xl:text-7xl 2xl:text-8xl [@media(max-height:720px)]:lg:text-4xl [@media(max-height:560px)]:lg:text-3xl font-extrabold flex-shrink text-black dark:text-[#D5D5D5]">
         {children}
       </span>
       <div className="flex-grow border-t border-black dark:border-[#D5D5D5]"></div>
@@ -31,35 +31,37 @@ function WordBetweenLine({ children }: { children: React.ReactNode }) {
   );
 }
 
-function LandingPageCard({
+export function LandingPageCard({
   title,
   content,
   imagePath,
   altOfImage,
+  href = "#sign-in",
 }: {
   title: string;
   content: string;
   imagePath: any;
   altOfImage: string;
+  href?: string;
 }) {
   return (
-    <Link href={"#sign-in"} className="relative overflow-hidden group">
+    <Link href={href} className="relative overflow-hidden group">
       <div className="hidden lg:block absolute left-0 top-0 w-[150px] h-[150px] rounded-full bg-none transition duration-1000 group-hover:duration-200 group-hover:bg-[#3BF4C7]"></div>
       <div className="block lg:hidden absolute left-0 top-0 w-[100px] h-[100px] rounded-full bg-[#3BF4C7]"></div>
       <div className="hidden lg:block absolute right-0 bottom-0 w-[150px] h-[150px] rounded-full transition duration-1000 group-hover:duration-200 md:bg-none md:group-hover:bg-[#82BEE9]"></div>
       <div className="block lg:hidden absolute right-0 bottom-0 w-[100px] h-[100px] rounded-full bg-[#82BEE9]"></div>
 
-      <div className="relative flex flex-col justify-between w-full h-full bg-[#5FC4E7]/20 dark:bg-[#7D7467]/20 backdrop-blur-[100px] border-[#5FC4E7]/20 dark:border-[#7D7467]/20 border p-1 md:p-4">
-        <div className="flex items-center w-full h-[150px] md:h-5/6 justify-between">
+      <div className="relative flex flex-col justify-between w-full h-full bg-[#5FC4E7]/20 dark:bg-[#7D7467]/20 backdrop-blur-[100px] border-[#5FC4E7]/20 dark:border-[#7D7467]/20 border p-2 md:p-4">
+        <div className="flex items-center w-full h-[110px] md:h-[160px] lg:h-[200px] xl:h-[220px] [@media(max-height:720px)]:lg:h-[140px] [@media(max-height:560px)]:lg:h-[110px] justify-between gap-4">
           <Image
             src={imagePath}
             alt={altOfImage}
-            className="h-[75%] lg:h-[90%] dark:invert-[.835] dark:hue-rotate-180"
+            className="h-[78%] shrink-0 dark:invert-[.835] dark:hue-rotate-180"
           />
-          <div className="flex-col gap-5">
-            <span className="text-xl md:text-4xl font-extrabold">{title}</span>
+          <div className="flex-col gap-3 min-w-0">
+            <span className="text-lg md:text-2xl lg:text-2xl xl:text-3xl font-extrabold">{title}</span>
             <br />
-            <span className="text-sm md:text-lg">{content}</span>
+            <span className="text-xs md:text-sm lg:text-sm xl:text-base">{content}</span>
           </div>
         </div>
         <div className="flex justify-between">
@@ -67,7 +69,7 @@ function LandingPageCard({
           <Image
             src={ArrowRight}
             alt="ArrowRight"
-            className="md:h-[35px] h-[20px] dark:invert-[0.835]"
+            className="h-[18px] md:h-[24px] lg:h-[28px] dark:invert-[0.835]"
           />
         </div>
       </div>
@@ -95,7 +97,7 @@ function LandingPageContent() {
             </h4>
             <div className="mt-6">
               <Link
-                href="/home"
+                href="/"
                 title="Open ExamCooker"
                 className="relative group inline-flex"
               >
@@ -153,10 +155,8 @@ function LandingPageContent() {
         <div className="hidden lg:block absolute bottom-0 left-0  w-[200px] h-[100px] rounded-full blur-[100px] bg-none transition duration-1000 bg-[#8DCAE9]"></div>
         <WordBetweenLine>
           <div id="sign-in" className="text-center">
-            <GradientText>
-              Start Cooking Your
-              <br /> Academic Success Today{" "}
-            </GradientText>
+            Start <GradientText>Cooking</GradientText> Your
+            <br /> Academic <GradientText>Success</GradientText> Today
           </div>
         </WordBetweenLine>
         <br />
@@ -168,7 +168,7 @@ function LandingPageContent() {
       <div className="lg:sticky lg:h-screen lg:top-0 lg:bg-[#C2E6EC] lg:dark:bg-[#0C1222] flex-col content-center">
         <WordBetweenLine>
           <div className="drop-shadow-[0px_2px_rgba(59,244,199,1)]">
-            Why Examcooker?
+            Why Exam<GradientText>Cooker</GradientText>?
           </div>
         </WordBetweenLine>
         <br />

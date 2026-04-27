@@ -1,12 +1,10 @@
 "use client";
 
-import React from 'react';
+import React from "react";
 import Link from "next/link";
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faHeart } from '@fortawesome/free-solid-svg-icons';
-import { useBookmarks } from './BookmarksProvider';
-import {useToast} from "@/components/ui/use-toast";
 import Image from "@/app/components/common/AppImage";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faCheck, faDownload } from "@fortawesome/free-solid-svg-icons";
 
 interface NotesCardProps {
     note: {
@@ -16,53 +14,93 @@ interface NotesCardProps {
     };
     index: number;
     openInNewTab?: boolean;
+    selected?: boolean;
+    onToggleSelect?: (id: string) => void;
+    onDownload?: (id: string) => void;
 }
 
-
 export function removePdfExtension(filename: string): string {
-    if (filename.endsWith('.pdf')) {
+    if (filename.toLowerCase().endsWith(".pdf")) {
         return filename.slice(0, -4);
     }
     return filename;
 }
 
-function NotesCard({ note, index }: NotesCardProps) {
-    const { isBookmarked, toggleBookmark } = useBookmarks();
-    const isFav = isBookmarked(note.id, 'note');
-    const { toast } = useToast();
+function NotesCard({
+    note,
+    index,
+    openInNewTab,
+    selected = false,
+    onToggleSelect,
+    onDownload,
+}: NotesCardProps) {
+    const displayTitle = removePdfExtension(note.title);
 
-    const handleToggleFav = (e: React.MouseEvent) => {
+    const handleToggleSelect = (e: React.MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
-        toggleBookmark({ id: note.id, type: 'note', title: note.title }, !isFav).catch(()=> toast({title: "Error! Could not add to favorites", variant: "destructive"}) );
+        onToggleSelect?.(note.id);
+    };
+
+    const handleDownload = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onDownload?.(note.id);
     };
 
     return (
+        <div className="h-full w-full max-w-sm text-black dark:text-[#D5D5D5]">
+            <Link
+                href={`/notes/${note.id}`}
+                prefetch={index < 3}
+                transitionTypes={openInNewTab ? undefined : ["nav-forward"]}
+                target={openInNewTab ? "_blank" : undefined}
+                className={`group block max-w-96 cursor-pointer border-2 text-center transition duration-200 hover:scale-105 hover:border-b-2 hover:border-b-[#ffffff] hover:shadow-xl dark:hover:border-b-[#3BF4C7] dark:hover:bg-[#ffffff]/10 lg:dark:bg-[#0C1222] ${selected
+                        ? "border-black bg-[#5FC4E7] shadow-[4px_4px_0_0_rgba(0,0,0,1)] dark:border-[#3BF4C7] dark:bg-[#0C1222] dark:shadow-[4px_4px_0_0_rgba(59,244,199,0.35)]"
+                        : "border-[#5FC4E7] bg-[#5FC4E7] dark:border-[#ffffff]/20 dark:bg-[#ffffff]/10"
+                    }`}
+            >
+                <div className="flex min-h-[4.75rem] items-start px-4 pb-2 pt-3">
+                    <div className="min-w-0 flex-1 text-left">
+                        <div className="line-clamp-2 w-full text-sm font-semibold leading-snug text-black dark:text-[#D5D5D5]">
+                            {displayTitle}
+                        </div>
+                    </div>
+                </div>
 
- <div className={`max-w-sm w-full h-full text-black dark:text-[#D5D5D5]`}>
-    <Link
-        href={`/notes/${note.id}`}
-        prefetch={index < 3}
-        className="block hover:shadow-xl px-5 py-6 w-full text-center bg-[#5FC4E7] dark:bg-[#ffffff]/10 lg:dark:bg-[#0C1222] dark:border-b-[#3BF4C7] dark:lg:border-b-[#ffffff]/20 dark:border-[#ffffff]/20 border-2 border-[#5FC4E7] hover:border-b-[#ffffff] hover:border-b-2 dark:hover:border-b-[#3BF4C7]  dark:hover:bg-[#ffffff]/10 transition duration-200 transform hover:scale-105 max-w-96 cursor-pointer"
-    >
-        <div className="bg-[#d9d9d9] w-full h-44 relative overflow-hidden">
+                <div className="relative h-44 w-full overflow-hidden bg-[#d9d9d9]">
                     <Image
                         src={note.thumbNailUrl || "/assets/ExamCooker.png"}
-                        alt={removePdfExtension(note.title)}
+                        alt={displayTitle}
                         fill
                         sizes="(min-width: 1024px) 320px, (min-width: 768px) 45vw, 90vw"
                         className="object-cover"
                         priority={index < 3}
                     />
-                </div>
-                <div className="flex justify-between items-center">
-                    <div></div>
-                    <div className="mb-2 w-full whitespace-nowrap overflow-hidden text-ellipsis text-lg">
-                        {removePdfExtension(note.title)}
-                    </div>
-                    <button onClick={handleToggleFav} className="transition-colors duration-200">
-                        <FontAwesomeIcon icon={faHeart} color={isFav ? 'red' : 'lightgrey'} />
-                    </button>
+                    {onToggleSelect && (
+                        <button
+                            type="button"
+                            onClick={handleToggleSelect}
+                            aria-label={selected ? "Deselect note" : "Select note"}
+                            aria-pressed={selected}
+                            className={`absolute left-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded transition ${selected
+                                    ? "bg-black text-white dark:bg-[#3BF4C7] dark:text-[#0C1222]"
+                                    : "bg-white/80 text-transparent backdrop-blur hover:bg-white hover:text-black/40 dark:bg-[#0C1222]/60 dark:hover:bg-[#0C1222]"
+                                }`}
+                        >
+                            <FontAwesomeIcon icon={faCheck} className="h-2 w-2" />
+                        </button>
+                    )}
+                    {onDownload && (
+                        <button
+                            type="button"
+                            onClick={handleDownload}
+                            aria-label="Download note"
+                            className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded bg-white/80 text-black/70 backdrop-blur transition hover:bg-white hover:text-black dark:bg-[#0C1222]/60 dark:text-[#D5D5D5]/70 dark:hover:bg-[#0C1222] dark:hover:text-[#D5D5D5]"
+                        >
+                            <FontAwesomeIcon icon={faDownload} className="h-2.5 w-2.5" />
+                        </button>
+                    )}
                 </div>
             </Link>
         </div>
